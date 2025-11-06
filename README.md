@@ -201,7 +201,7 @@ bq query --use_legacy_sql=false \
 OPTIONS(location='US');
 
 CREATE MODEL IF NOT EXISTS \`$PROJECT_ID.model.textembed\`
-REMOTE WITH CONNECTION \`$PROJECT_ID.US.DEFAULT\`
+REMOTE WITH CONNECTION DEFAULT
 OPTIONS(endpoint='text-embedding-005');"
 
 # Verify the model was created
@@ -318,7 +318,7 @@ gcloud functions deploy process-lab \
 
 # Retrieve Full Articles
 cd ../capricorn-retrieve-full-articles
-gcloud functions deploy retrieve-full-articles-live-pmc-text-embeddings-005 \
+gcloud functions deploy retrieve-full-articles-live-pmc-text-embedding-005 \
   --gen2 \
   --runtime=python312 \
   --region=$FUNCTION_REGION \
