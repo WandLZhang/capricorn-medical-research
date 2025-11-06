@@ -11,20 +11,45 @@ echo "This script will create .env.yaml files for all Cloud Functions."
 echo "You'll be prompted for common values once."
 echo ""
 
-# Prompt for common values
-read -p "Enter your GCP Project ID: " PROJECT_ID
-read -p "Enter your Firestore Database ID (e.g., capricorn-prod): " DATABASE_ID
-read -p "Enter your Cloud Functions region (e.g., us-central1): " REGION
-read -p "Enter your BigQuery Project ID (press Enter if same as GCP Project): " BIGQUERY_PROJECT_ID
-
-# Use GCP Project ID if BigQuery Project ID is empty
-if [ -z "$BIGQUERY_PROJECT_ID" ]; then
-    BIGQUERY_PROJECT_ID=$PROJECT_ID
+# Check for existing environment variables or prompt for values
+if [ -z "$PROJECT_ID" ]; then
+    read -p "Enter your GCP Project ID: " PROJECT_ID
+else
+    echo "Using PROJECT_ID from environment: $PROJECT_ID"
 fi
 
-# Prompt for BigQuery dataset names
-read -p "Enter your PMID dataset name (e.g., pmid_uscentral): " PMID_DATASET
-read -p "Enter your Journal dataset name (e.g., journal_rank): " JOURNAL_DATASET
+if [ -z "$DATABASE_ID" ]; then
+    read -p "Enter your Firestore Database ID (e.g., capricorn-prod): " DATABASE_ID
+else
+    echo "Using DATABASE_ID from environment: $DATABASE_ID"
+fi
+
+# Function deployment region
+if [ -z "$FUNCTION_REGION" ]; then
+    read -p "Enter your Cloud Functions deployment region (e.g., us-central1): " FUNCTION_REGION
+else
+    echo "Using FUNCTION_REGION from environment: $FUNCTION_REGION"
+fi
+
+# Vertex AI region (usually 'global' for Gemini models)
+if [ -z "$VERTEX_REGION" ]; then
+    VERTEX_REGION="global"
+    echo "Using default VERTEX_REGION: $VERTEX_REGION"
+else
+    echo "Using VERTEX_REGION from environment: $VERTEX_REGION"
+fi
+
+# Use same project for BigQuery
+BIGQUERY_PROJECT_ID=$PROJECT_ID
+
+# Hardcoded dataset names
+MODEL_DATASET="model"
+JOURNAL_DATASET="journal_rank"
+
+echo "Using BigQuery configuration:"
+echo "  - BigQuery Project: $BIGQUERY_PROJECT_ID"
+echo "  - Model Dataset: $MODEL_DATASET"
+echo "  - Journal Dataset: $JOURNAL_DATASET"
 
 # Optional: Prompt for SendGrid API key
 echo ""
@@ -40,7 +65,7 @@ cat > backend/capricorn-chat/.env.yaml << EOF
 # Environment variables for capricorn-chat Cloud Function
 PROJECT_ID: "$PROJECT_ID"
 DATABASE_ID: "$DATABASE_ID"
-LOCATION: "$REGION"
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/capricorn-chat/.env.yaml"
 
@@ -49,7 +74,7 @@ cat > backend/capricorn-redact-sensitive-info/.env.yaml << EOF
 # Environment variables for capricorn-redact-sensitive-info Cloud Function
 PROJECT_ID: "$PROJECT_ID"
 DLP_PROJECT_ID: "$PROJECT_ID"  # Using same as PROJECT_ID
-LOCATION: "$REGION"
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/capricorn-redact-sensitive-info/.env.yaml"
 
@@ -57,7 +82,7 @@ echo "✓ Created backend/capricorn-redact-sensitive-info/.env.yaml"
 cat > backend/capricorn-process-lab/.env.yaml << EOF
 # Environment variables for capricorn-process-lab Cloud Function
 PROJECT_ID: "$PROJECT_ID"
-LOCATION: "global"  # This function uses global location for document processing
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/capricorn-process-lab/.env.yaml"
 
@@ -66,8 +91,8 @@ cat > backend/capricorn-retrieve-full-articles/.env.yaml << EOF
 # Environment variables for capricorn-retrieve-full-articles Cloud Function
 GENAI_PROJECT_ID: "$PROJECT_ID"
 BIGQUERY_PROJECT_ID: "$BIGQUERY_PROJECT_ID"
-LOCATION: "$REGION"
-PMID_DATASET: "$PMID_DATASET"
+LOCATION: "$VERTEX_REGION"
+MODEL_DATASET: "$MODEL_DATASET"
 JOURNAL_DATASET: "$JOURNAL_DATASET"
 EOF
 echo "✓ Created backend/capricorn-retrieve-full-articles/.env.yaml"
@@ -77,7 +102,7 @@ cat > backend/capricorn-final-analysis/.env.yaml << EOF
 # Environment variables for capricorn-final-analysis Cloud Function
 GENAI_PROJECT_ID: "$PROJECT_ID"
 BIGQUERY_PROJECT_ID: "$BIGQUERY_PROJECT_ID"
-LOCATION: "$REGION"
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/capricorn-final-analysis/.env.yaml"
 
@@ -100,7 +125,7 @@ fi
 cat > backend/pubmed-search-tester-extract-disease/.env.yaml << EOF
 # Environment variables for pubmed-search-tester-extract-disease Cloud Function
 PROJECT_ID: "$PROJECT_ID"
-LOCATION: "$REGION"
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/pubmed-search-tester-extract-disease/.env.yaml"
 
@@ -108,7 +133,7 @@ echo "✓ Created backend/pubmed-search-tester-extract-disease/.env.yaml"
 cat > backend/pubmed-search-tester-extract-events/.env.yaml << EOF
 # Environment variables for pubmed-search-tester-extract-events Cloud Function
 PROJECT_ID: "$PROJECT_ID"
-LOCATION: "$REGION"
+LOCATION: "$VERTEX_REGION"
 EOF
 echo "✓ Created backend/pubmed-search-tester-extract-events/.env.yaml"
 
@@ -120,7 +145,8 @@ echo ""
 echo "Summary:"
 echo "- Project ID: $PROJECT_ID"
 echo "- Database ID: $DATABASE_ID"
-echo "- Region: $REGION"
+echo "- Function Region: $FUNCTION_REGION"
+echo "- Vertex AI Region: $VERTEX_REGION"
 echo "- BigQuery Project ID: $BIGQUERY_PROJECT_ID"
 
 if [ -z "$SENDGRID_API_KEY" ]; then
@@ -132,6 +158,5 @@ fi
 echo ""
 echo "Next steps:"
 echo "1. Review the generated .env.yaml files"
-echo "2. Deploy the Cloud Functions using:"
-echo "   ./deploy-all-functions.sh"
+echo "2. Deploy the Cloud Functions using the commands in the README"
 echo ""

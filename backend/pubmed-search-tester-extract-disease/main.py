@@ -79,7 +79,7 @@ def extract_disease(request):
         ]
 
         # Configure Gemini model
-        model = "gemini-2.0-flash-001"
+        model = "gemini-2.5-pro"
         tools = [types.Tool(google_search=types.GoogleSearch())]
         generate_content_config = types.GenerateContentConfig(
             temperature=1,

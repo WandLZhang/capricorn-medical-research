@@ -42,15 +42,14 @@ def get_full_articles(analyzed_articles):
     pmcids = [article['pmcid'] for article in analyzed_articles if 'pmcid' in article]
     pmcids_str = ', '.join([f"'{pmcid}'" for pmcid in pmcids])
     
-    # Query to get full articles directly by PMCID
-    project_id = os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016')
-    pmid_dataset = os.environ.get('PMID_DATASET', 'pmid_uscentral')
+    # Use the same public PMC table as retrieve-full-articles
+    pubmed_table = 'bigquery-public-data.pmc_open_access_commercial.articles'
     query = f"""
     SELECT 
-        base.name as PMCID,
-        base.content
-    FROM `{project_id}.{pmid_dataset}.pmid_embed_nonzero` base
-    WHERE base.name IN ({pmcids_str})
+        pmc_id as PMCID,
+        article_text as content
+    FROM `{pubmed_table}`
+    WHERE pmc_id IN ({pmcids_str})
     """
     
     try:
@@ -196,7 +195,7 @@ IMPORTANT: Return the analysis in markdown format with the specified table struc
 
 def analyze_with_gemini(prompt):
     """Analyze the case and articles using Gemini."""
-    model = "gemini-2.0-flash-001"
+    model = "gemini-2.5-pro"
     generate_content_config = types.GenerateContentConfig(
         temperature=0,
         top_p=0.95,

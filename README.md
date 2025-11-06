@@ -32,24 +32,95 @@ Create a Firestore database for storing chat conversations.
 - Set project: `gcloud config set project YOUR_GCP_PROJECT_ID`
 
 **1. Set project variables and enable APIs:**
+
+First, link Firebase to your existing Google Cloud project:
+
+**Link Firebase to Your Google Cloud Project:**
+- Go to https://console.firebase.google.com/
+- Click "Create a new Firebase project"
+- Click "Add Firebase to Google Cloud project"
+- Select your existing Google Cloud project from the dropdown
+- Follow the remaining setup steps (you can skip Google Analytics if not needed)
+- Verify the project is correctly linked by checking the project ID matches your GCP project
+
+After linking Firebase, continue with the setup:
+
+Choose a location for your Firestore database:
+- Multi-region options: `nam5` (US), `eur3` (Europe)
+- Regional options: `us-central1`, `europe-west1`, etc.
+- Full list: https://firebase.google.com/docs/firestore/locations
+
 ```bash
 # Set your configuration values
 export PROJECT_ID="YOUR_GCP_PROJECT_ID"
 export DATABASE_ID="YOUR_DATABASE_ID"  # e.g., "capricorn-prod", "capricorn-dev"
-export DATABASE_LOCATION="YOUR_LOCATION"  # See locations below
+export DATABASE_LOCATION="YOUR_LOCATION"  # e.g., "nam5" for US multi-region
+export FUNCTION_REGION="YOUR_FUNCTION_REGION"  # e.g., "us-central1" for Cloud Functions deployment
+export VERTEX_REGION="global"  # Use "global" for Vertex AI/Gemini access
 
 # Enable required APIs
 gcloud services enable \
   firestore.googleapis.com \
   cloudfunctions.googleapis.com \
   cloudbuild.googleapis.com \
+  run.googleapis.com \
   dlp.googleapis.com \
   aiplatform.googleapis.com \
   bigquery.googleapis.com \
   --project=$PROJECT_ID
+
+# Grant Cloud Build service account the required permissions
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/cloudbuild.builds.builder"
 ```
 
-**2. Create the database:**
+**5. Grant Cloud Functions service account required permissions:**
+
+Cloud Functions use the default compute service account which needs access to various services:
+
+```bash
+# Get the service account email
+SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+# Grant Firestore access (for chat storage)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/datastore.user"
+
+# Grant BigQuery access (for querying embeddings and journal data)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/bigquery.jobUser"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/bigquery.dataViewer"
+
+# Grant BigQuery connection user access (required for text embeddings)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/bigquery.connectionUser"
+
+# Grant DLP access (for PII redaction)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/dlp.user"
+
+# Grant Vertex AI access (for Gemini models and embeddings)
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/aiplatform.user"
+```
+
+These permissions allow the Cloud Functions to:
+- Read/write to Firestore for storing chat conversations
+- Query BigQuery for article embeddings and journal data
+- Use DLP API for redacting sensitive information
+- Access Vertex AI for Gemini models and text embeddings
+
+**6. Create the database:**
 ```bash
 # Create the Firestore database
 gcloud firestore databases create \
@@ -58,12 +129,7 @@ gcloud firestore databases create \
   --project=$PROJECT_ID
 ```
 
-**Choose a location:**
-See available locations at: https://firebase.google.com/docs/firestore/locations
-- Multi-region options: `nam5` (US), `eur3` (Europe)
-- Regional options: `us-central1`, `europe-west1`, etc.
-
-**2. After creating the database, update the frontend configuration:**
+**7. After creating the database, update the frontend configuration:**
 ```bash
 cd frontend
 cp .env.example .env
@@ -73,46 +139,132 @@ cp .env.example .env
 
 **Note**: Backend configuration will be handled in the next section using the setup script.
 
-**3. Create Firestore security rules:**
-```javascript
-// Create a file named firestore.rules in your project root
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Allow authenticated users to read/write their own chats
-    match /chats/{userId}/conversations/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
+**8. Configure and deploy Firestore security rules:**
+
+First, update the `firebase.json` to specify the database ID:
+
+```bash
+cd frontend
+
+# Update firebase.json to include the database ID
+# The file should have this structure:
+cat > firebase.json << EOF
+{
+  "hosting": {
+    "site": "<app-nickname-in-step-4.1.2 Find Your Configuration>",
+    "public": "build",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "database": "$DATABASE_ID"
   }
+}
+EOF
+```
+
+Then deploy the security rules to the specific database:
+
+```bash
+firebase deploy --only firestore:rules --project $PROJECT_ID
+```
+
+The security rules in `firestore.rules` allow authenticated users to read/write their own chats:
+```
+match /chats/{userId}/conversations/{document=**} {
+  allow read, write: if request.auth != null && request.auth.uid == userId;
 }
 ```
 
-**4. Deploy the security rules:**
+### 2. BigQuery Setup
+
+The application requires BigQuery datasets with PubMed article embeddings and metadata. Set these up before deploying Cloud Functions.
+
+#### 2.1 Create Text Embedding Model
+
+The application uses BigQuery ML to create text embeddings for searching PubMed articles. Create the embedding model:
+
 ```bash
-firebase deploy --only firestore:rules
+# Create the model dataset and text embedding model
+bq query --use_legacy_sql=false \
+"CREATE SCHEMA IF NOT EXISTS \`$PROJECT_ID.model\`
+OPTIONS(location='US');
+
+CREATE MODEL IF NOT EXISTS \`$PROJECT_ID.model.textembed\`
+REMOTE WITH CONNECTION \`$PROJECT_ID.US.DEFAULT\`
+OPTIONS(endpoint='text-embedding-005');"
+
+# Verify the model was created
+bq show --model $PROJECT_ID.model.textembed
 ```
 
-### 2. Cloud Functions Setup
+This creates:
+- A dataset called `model` in the US location
+- A text embedding model using Google's `text-embedding-005` endpoint
+
+#### 2.2 Journal Impact Factor Dataset Setup
+
+The application uses journal impact factor data (SJR scores) to rank articles. The repository includes a pre-downloaded SCImago Journal Rank CSV file.
+
+**Create the journal_rank dataset:**
+
+```bash
+# Create the journal_rank dataset
+bq query --use_legacy_sql=false \
+"CREATE SCHEMA IF NOT EXISTS \`$PROJECT_ID.journal_rank\`
+OPTIONS(location='US');"
+```
+
+**Load the journal data into BigQuery:**
+
+```bash
+# Install required dependencies
+pip install google-cloud-bigquery
+
+# Navigate to the function directory and run the loading script
+cd backend/capricorn-retrieve-full-articles
+python load_journal_data_to_bq.py \
+  --project-id $PROJECT_ID \
+  --dataset-id journal_rank \
+  --table-id scimagojr_2024 \
+  --csv-file scimagojr_2024.csv
+```
+
+This script will:
+- Create a `journal_rank` dataset if it doesn't exist
+- Load the SCImago journal data into a table named `scimagojr_2024`
+- Display sample data and confirm successful loading
+
+**Verify the data loaded correctly:**
+```bash
+# Check the record count (should show ~29,000+ journals)
+bq query --use_legacy_sql=false \
+"SELECT COUNT(*) as journal_count FROM \`$PROJECT_ID.journal_rank.scimagojr_2024\`"
+```
+
+### 3. Cloud Functions Setup
 
 Each Cloud Function needs to be deployed with the appropriate environment variables:
 
-#### 2.1 Create Backend Configuration
+#### 3.1 Create Backend Configuration
 
-Use the provided setup script to create all `.env.yaml` files automatically:
+Use the provided setup script to create all `.env.yaml` files:
 
 ```bash
-# Run the setup script
+# If you've already set the environment variables in section 1, the script will use them
+# Otherwise, it will prompt you for the required values
 ./setup-backend-config.sh
 ```
-
-The script will prompt you for:
-- GCP Project ID
-- Firestore Database ID
-- Cloud Functions region
-- BigQuery Project ID (optional, defaults to GCP Project ID)
-- PMID dataset name (e.g., pubmed)
-- Journal dataset name (e.g., journal)
-- SendGrid API key (optional)
 
 This creates `.env.yaml` files for all Cloud Functions:
 - `backend/capricorn-chat/.env.yaml`
@@ -121,30 +273,12 @@ This creates `.env.yaml` files for all Cloud Functions:
 - `backend/capricorn-retrieve-full-articles/.env.yaml`
 - `backend/capricorn-final-analysis/.env.yaml`
 - `backend/capricorn-feedback/.env.yaml`
+- `backend/pubmed-search-tester-extract-disease/.env.yaml`
+- `backend/pubmed-search-tester-extract-events/.env.yaml`
 
 **Note**: The `.env.yaml` files are already in `.gitignore` to prevent committing sensitive data.
 
-**Environment Variables Reference:**
-
-Each Cloud Function uses specific environment variables configured in its `.env.yaml` file:
-
-- **Common variables across all functions:**
-  - `GCP_PROJECT`: Your Google Cloud Project ID
-  - `FIRESTORE_DATABASE_ID`: The Firestore database ID (e.g., "capricorn-prod")
-  - `CLOUD_FUNCTIONS_REGION`: The region where functions are deployed
-
-- **BigQuery-specific variables:**
-  - `BIGQUERY_PROJECT_ID`: Project ID containing BigQuery datasets (defaults to GCP_PROJECT)
-  - `PMID_DATASET`: Dataset name for PubMed articles (e.g., "pubmed")
-  - `JOURNAL_DATASET`: Dataset name for journal rankings (e.g., "journal_rank")
-
-- **Function-specific variables:**
-  - `SENDGRID_API_KEY`: (capricorn-feedback only) API key for sending feedback emails
-  - Additional model-specific configurations for Gemini AI
-
-The setup script (`setup-backend-config.sh`) automatically creates these files with the correct values based on your input.
-
-#### 2.2 Deploy Cloud Functions
+#### 3.2 Deploy Cloud Functions
 
 Deploy each function with its configuration:
 
@@ -157,7 +291,7 @@ cd capricorn-redact-sensitive-info
 gcloud functions deploy redact-sensitive-info \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=redact_sensitive_info \
   --trigger-http \
@@ -169,7 +303,7 @@ cd ../capricorn-process-lab
 gcloud functions deploy process-lab \
   --gen2 \
   --runtime=python313 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=process_lab \
   --trigger-http \
@@ -187,7 +321,7 @@ cd ../capricorn-retrieve-full-articles
 gcloud functions deploy retrieve-full-articles-live-pmc-text-embeddings-005 \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=retrieve_full_articles \
   --trigger-http \
@@ -204,7 +338,7 @@ cd ../capricorn-final-analysis
 gcloud functions deploy final-analysis \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=final_analysis \
   --trigger-http \
@@ -221,7 +355,7 @@ cd ../capricorn-chat
 gcloud functions deploy chat \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=chat \
   --trigger-http \
@@ -238,7 +372,7 @@ cd ../capricorn-feedback
 gcloud functions deploy send-feedback-email \
   --gen2 \
   --runtime=python39 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=send_feedback_email \
   --trigger-http \
@@ -255,7 +389,7 @@ cd ../pubmed-search-tester-extract-disease
 gcloud functions deploy extract-disease \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=extract_disease \
   --trigger-http \
@@ -272,7 +406,7 @@ cd ../pubmed-search-tester-extract-events
 gcloud functions deploy extract-events \
   --gen2 \
   --runtime=python312 \
-  --region=YOUR_REGION \
+  --region=$FUNCTION_REGION \
   --source=. \
   --entry-point=extract_events \
   --trigger-http \
@@ -285,7 +419,7 @@ gcloud functions deploy extract-events \
   --env-vars-file=.env.yaml
 ```
 
-#### 2.3 Collect Function URLs and Update Frontend
+#### 3.3 Collect Function URLs and Update Frontend
 
 After deploying all functions, collect their URLs and automatically update the frontend:
 
@@ -293,8 +427,8 @@ After deploying all functions, collect their URLs and automatically update the f
 # Navigate back to project root
 cd ../..
 
-# Set your region (must match deployment region from section 2.2)
-export REGION=YOUR_REGION
+# Use the FUNCTION_REGION from section 1 or set it now
+export REGION=$FUNCTION_REGION
 
 # Collect all function URLs
 echo "Collecting Cloud Function URLs..."
@@ -332,84 +466,6 @@ sed -i.bak "s|https://capricorn-process-lab-[^']*|$PROCESS_LAB_URL|" frontend/sr
 echo "✓ Updated frontend/src/utils/api.js with Cloud Function URLs"
 echo "✓ Saved URLs to function-urls.txt for reference"
 ```
-
-### 3. BigQuery Setup
-
-The application requires BigQuery datasets with PubMed article embeddings and metadata.
-
-#### 3.1 Journal Impact Factor Dataset Setup
-
-The application uses journal impact factor data (SJR scores) to rank articles. The repository includes a pre-downloaded SCImago Journal Rank CSV file.
-
-**Prerequisites:**
-- Ensure you have a Python virtual environment set up
-- Ensure you have the environment variables from section 1 still set
-
-**Load the journal data into BigQuery:**
-
-```bash
-# Create and/or activate Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install required dependencies
-pip install google-cloud-bigquery
-
-# Navigate to the function directory and run the loading script
-cd backend/capricorn-retrieve-full-articles
-python load_journal_data_to_bq.py \
-  --project-id $BIGQUERY_PROJECT_ID \
-  --dataset-id journal_rank \
-  --table-id scimagojr_2024 \
-  --csv-file scimagojr_2024.csv
-```
-
-This script will:
-- Create a `journal_rank` dataset if it doesn't exist
-- Load the SCImago journal data into a table named `scimagojr_2024`
-- Display sample data and confirm successful loading
-
-**Verify the data loaded correctly:**
-```bash
-# Check the record count (should show ~29,000+ journals)
-bq query --use_legacy_sql=false \
-"SELECT COUNT(*) as journal_count FROM \`$BIGQUERY_PROJECT_ID.journal_rank.scimagojr_2024\`"
-```
-
-#### 3.2 Service Account Setup
-
-1. Create a service account:
-   ```bash
-   gcloud iam service-accounts create capricorn-bigquery-reader \
-     --display-name="Capricorn BigQuery Reader" \
-     --project=$PROJECT_ID
-   ```
-
-2. Grant required permissions:
-   ```bash
-   # Grant BigQuery permissions
-   gcloud projects add-iam-policy-binding $BIGQUERY_PROJECT_ID \
-     --member="serviceAccount:capricorn-bigquery-reader@$PROJECT_ID.iam.gserviceaccount.com" \
-     --role="roles/bigquery.dataViewer"
-   
-   # Grant Vertex AI permissions (required for Gemini embeddings model access)
-   gcloud projects add-iam-policy-binding $PROJECT_ID \
-     --member="serviceAccount:capricorn-bigquery-reader@$PROJECT_ID.iam.gserviceaccount.com" \
-     --role="roles/aiplatform.user"
-   ```
-
-3. Create and download service account key:
-   ```bash
-   gcloud iam service-accounts keys create bigquery-service-account.json \
-     --iam-account=capricorn-bigquery-reader@$PROJECT_ID.iam.gserviceaccount.com
-   ```
-
-#### 3.2 BigQuery Dataset Transfer
-
-**Important**: To set up the BigQuery dataset with PubMed embeddings, you need assistance from the Google team:
-
-1. Contact the GPS-RIT team at: **gps-rit@google.com**
-2. Follow the setup guide: https://docs.google.com/document/d/1__5TOLrIEoUbiksQdNVKUR5hQW5E0o9nOM-WBiHyzjo/edit?tab=t.0
 
 ### 4. Frontend Configuration
 
@@ -463,11 +519,49 @@ Update `firebase.json` with your project ID:
 # Get the project ID from the .env file
 PROJECT_ID=$(grep REACT_APP_FIREBASE_PROJECT_ID .env | cut -d '=' -f2)
 
-# Update firebase.json with the project ID
+# Update firebase.json with the project ID or app nickname you specified in 2. Find Your Configuration
 sed -i.bak "s|\"site\": \".*\"|\"site\": \"$PROJECT_ID\"|" firebase.json
 
 echo "✓ Updated firebase.json with site name: $PROJECT_ID"
 ```
+
+#### 4.4 Configure Firebase Authentication
+
+Before deploying, you need to configure Firebase Authentication:
+
+1. **Enable Authentication Providers**:
+   - Go to [Firebase Console](https://console.firebase.google.com)
+   - Select your project
+   - Navigate to "Authentication" → "Sign-in method"
+   
+   **Enable Google Authentication:**
+   - Click on "Google" provider
+   - Toggle "Enable" to ON
+   - Select a support email for the project
+   - Click "Save"
+   
+   **Enable Anonymous Authentication:**
+   - Click on "Anonymous" provider
+   - Toggle "Enable" to ON
+   - Click "Save"
+   
+   This allows users to either sign in with their Google account or use the app anonymously.
+
+2. **Add Authorized Domains**:
+   - Still in "Authentication" → "Settings" tab
+   - Under "Authorized domains", add:
+     - `localhost` (for local development)
+     - Your Firebase Hosting domain: `YOUR-APP-NICKNAME.web.app` (e.g., "capricorn-medical.web.app")
+     - Your custom domain (if applicable)
+     - Any other domains where you'll host the app
+   
+   **Important**: Any domain where your app is hosted must be added to this list, otherwise authentication will fail with a redirect_uri_mismatch error.
+
+3. **Configure OAuth Consent Screen** (if prompted):
+   - Choose "External" user type (unless using Workspace)
+   - Fill in the required application information
+   - Add your app domains to authorized domains
+   - Save the configuration
 
 ### 5. Deploy Frontend
 

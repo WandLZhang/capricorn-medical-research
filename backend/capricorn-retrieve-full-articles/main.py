@@ -267,7 +267,7 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
     prompt += "\n\nIMPORTANT: Return ONLY the raw JSON object. Do not include any explanatory text, markdown formatting, or code blocks. The response should start with '{' and end with '}' with no other characters before or after."
     
     # Configure Gemini
-    model = "gemini-2.0-flash-001"
+    model = "gemini-2.5-pro"
     generate_content_config = types.GenerateContentConfig(
         temperature=0,
         top_p=0.95,
@@ -383,10 +383,10 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
 
 def create_bq_query(events_text, num_articles=15):
     project_id = os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016')
-    pmid_dataset = os.environ.get('PMID_DATASET', 'pmid_uscentral')
+    model_dataset = os.environ.get('MODEL_DATASET', 'model')
     # Use the new public PMC table
     pubmed_table = 'bigquery-public-data.pmc_open_access_commercial.articles'
-    embedding_model = f'{project_id}.{pmid_dataset}.textembed'
+    embedding_model = f'{project_id}.{model_dataset}.textembed'
     
     return f"""
     DECLARE query_text STRING;

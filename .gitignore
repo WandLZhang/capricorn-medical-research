@@ -57,3 +57,4 @@ test-debug/
 .idea/
 *.swp
 *.swo
+function-urls.txt

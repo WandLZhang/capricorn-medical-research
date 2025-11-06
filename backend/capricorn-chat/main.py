@@ -180,7 +180,7 @@ def chat(request):
         def generate():
             try:
                 response = client.models.generate_content_stream(
-                    model="gemini-2.0-flash-001",
+                    model="gemini-2.5-pro",
                     contents=contents,
                     config=generate_content_config
                 )

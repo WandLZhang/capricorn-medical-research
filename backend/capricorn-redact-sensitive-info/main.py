@@ -172,32 +172,77 @@ def get_info_types():
     return all_types
 
 def standardize_date(date_string):
-    prompt = f"""
-    Convert the following date to YYYY-MM-DD format: {date_string}
+    prompt = f"""Convert this date to YYYY-MM-DD format: {date_string}
     
-    Respond with ONLY the standardized date in YYYY-MM-DD format.
-    If the date cannot be converted, respond with 'INVALID'.
-    """
+    Return ONLY a JSON object with a "response" field containing the standardized date in YYYY-MM-DD format, or 'INVALID' if it cannot be converted.
+    Example: {{"response": "2023-03-22"}}"""
     
-    contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=prompt)
+            ]
+        ),
+    ]
     
     generate_content_config = types.GenerateContentConfig(
-        temperature=0,
-        top_p=1,
-        max_output_tokens=20,
-        response_modalities=["TEXT"],
+        temperature = 1,
+        top_p = 0.95,
+        seed = 0,
+        max_output_tokens = 65535,
+        safety_settings = [types.SafetySetting(
+            category="HARM_CATEGORY_HATE_SPEECH",
+            threshold="OFF"
+        ),types.SafetySetting(
+            category="HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold="OFF"
+        ),types.SafetySetting(
+            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold="OFF"
+        ),types.SafetySetting(
+            category="HARM_CATEGORY_HARASSMENT",
+            threshold="OFF"
+        )],
+        response_mime_type = "application/json",
+        response_schema = {"type":"OBJECT","properties":{"response":{"type":"STRING"}}},
+        thinking_config=types.ThinkingConfig(
+            thinking_budget=-1,
+        ),
     )
     
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=contents,
-        config=generate_content_config
-    )
-    
-    standardized_date = response.text.strip()
-    if standardized_date == 'INVALID':
-        raise ValueError("Invalid date format")
-    return standardized_date
+    try:
+        # Use streaming to get the response
+        response_text = ""
+        raw_chunks = []
+        
+        for chunk in client.models.generate_content_stream(
+            model = "gemini-2.5-pro",
+            contents = contents,
+            config = generate_content_config,
+        ):
+            raw_chunks.append(f"Chunk: {chunk}")
+            print(f"Raw chunk: {chunk}")
+            if chunk.text:
+                response_text += chunk.text
+                print(f"Chunk text: '{chunk.text}'")
+        
+        print(f"All raw chunks: {raw_chunks}")
+        print(f"Final response text: '{response_text}'")
+        
+        if response_text:
+            import json
+            result = json.loads(response_text)
+            standardized_date = result.get('response', 'INVALID')
+            if standardized_date == 'INVALID':
+                raise ValueError("Invalid date format")
+            return standardized_date
+        else:
+            raise ValueError("Empty response from Gemini")
+    except Exception as e:
+        print(f"Error in standardize_date: {str(e)}")
+        print(f"Response text was: '{response_text}'")
+        raise ValueError(f"Failed to standardize date: {str(e)}")
 
 def calculate_age(birth_date):
     today = datetime.now()
