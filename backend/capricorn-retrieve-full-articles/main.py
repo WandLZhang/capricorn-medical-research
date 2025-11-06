@@ -382,11 +382,11 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
         return None
 
 def create_bq_query(events_text, num_articles=15):
-    project_id = os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016')
+    project_id = os.environ.get('BIGQUERY_PROJECT_ID', 'wz-capricorn-run-through')
     model_dataset = os.environ.get('MODEL_DATASET', 'model')
-    # Use the new public PMC table
-    pubmed_table = 'bigquery-public-data.pmc_open_access_commercial.articles'
-    embedding_model = f'{project_id}.{model_dataset}.textembed'
+    # Use the new PMC daily publish table with gemini-embedding-001
+    pubmed_table = 'playground-439016.pmc_daily_publish.pmc_articles_gemini_publish'
+    embedding_model = f'{project_id}.{model_dataset}.gemini_embedding_001'
     
     return f"""
     DECLARE query_text STRING;

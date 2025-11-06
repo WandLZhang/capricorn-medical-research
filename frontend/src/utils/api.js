@@ -17,7 +17,7 @@
 export const retrieveAndAnalyzeArticles = async (disease, events, methodologyContent, onProgress, numArticles = 15) => {
   try {
     // Step 1: Get PMIDs and analysis from first cloud function
-    const response = await fetch(`https://retrieve-full-articles-live-pmc-text-embeddings-0-sfslkz5uiq-uc.a.run.app`, {
+    const response = await fetch(`https://retrieve-full-articles-live-pmc-gemini-embedding--sfslkz5uiq-uc.a.run.app`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -318,7 +318,7 @@ export const generateFinalAnalysis = async (caseNotes, disease, events, analyzed
       analyzed_articles: analyzedArticles
     });
 
-    const response = await fetch(`https://final-analysis-sfslkz5uiq-uc.a.run.app`, {
+    const response = await fetch(`https://final-analysis-gemini-embedding-001-sfslkz5uiq-uc.a.run.app`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

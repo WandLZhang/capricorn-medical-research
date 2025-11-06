@@ -42,8 +42,8 @@ def get_full_articles(analyzed_articles):
     pmcids = [article['pmcid'] for article in analyzed_articles if 'pmcid' in article]
     pmcids_str = ', '.join([f"'{pmcid}'" for pmcid in pmcids])
     
-    # Use the same public PMC table as retrieve-full-articles
-    pubmed_table = 'bigquery-public-data.pmc_open_access_commercial.articles'
+    # Use the new PMC daily publish table with gemini-embedding-001
+    pubmed_table = 'playground-439016.pmc_daily_publish.pmc_articles_gemini_publish'
     query = f"""
     SELECT 
         pmc_id as PMCID,
@@ -303,4 +303,4 @@ def final_analysis(request):
 
 if __name__ == "__main__":
     app = functions_framework.create_app(target="final_analysis")
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8081, debug=True)

@@ -200,12 +200,12 @@ bq query --use_legacy_sql=false \
 "CREATE SCHEMA IF NOT EXISTS \`$PROJECT_ID.model\`
 OPTIONS(location='US');
 
-CREATE MODEL IF NOT EXISTS \`$PROJECT_ID.model.textembed\`
-REMOTE WITH CONNECTION \`$PROJECT_ID.US.DEFAULT\`
-OPTIONS(endpoint='text-embedding-005');"
+CREATE MODEL IF NOT EXISTS \`$PROJECT_ID.model.gemini_embedding_001\`
+REMOTE WITH CONNECTION DEFAULT
+OPTIONS(endpoint='gemini-embedding-001');"
 
 # Verify the model was created
-bq show --model $PROJECT_ID.model.textembed
+bq show --model $PROJECT_ID.model.gemini_embedding_001
 ```
 
 This creates:
@@ -318,7 +318,7 @@ gcloud functions deploy process-lab \
 
 # Retrieve Full Articles
 cd ../capricorn-retrieve-full-articles
-gcloud functions deploy retrieve-full-articles-live-pmc-text-embeddings-005 \
+gcloud functions deploy retrieve-full-articles-live-pmc-gemini-embedding-001 \
   --gen2 \
   --runtime=python312 \
   --region=$FUNCTION_REGION \
@@ -335,7 +335,7 @@ gcloud functions deploy retrieve-full-articles-live-pmc-text-embeddings-005 \
 
 # Final Analysis
 cd ../capricorn-final-analysis
-gcloud functions deploy final-analysis \
+gcloud functions deploy final-analysis-gemini-embedding-001 \
   --gen2 \
   --runtime=python312 \
   --region=$FUNCTION_REGION \
@@ -434,8 +434,8 @@ export REGION=$FUNCTION_REGION
 echo "Collecting Cloud Function URLs..."
 REDACT_URL=$(gcloud functions describe redact-sensitive-info --region=$REGION --format='value(serviceConfig.uri)')
 PROCESS_LAB_URL=$(gcloud functions describe process-lab --region=$REGION --format='value(serviceConfig.uri)')
-RETRIEVE_ARTICLES_URL=$(gcloud functions describe retrieve-full-articles-live-pmc-text-embeddings-005 --region=$REGION --format='value(serviceConfig.uri)')
-FINAL_ANALYSIS_URL=$(gcloud functions describe final-analysis --region=$REGION --format='value(serviceConfig.uri)')
+RETRIEVE_ARTICLES_URL=$(gcloud functions describe retrieve-full-articles-live-pmc-gemini-embedding-001 --region=$REGION --format='value(serviceConfig.uri)')
+FINAL_ANALYSIS_URL=$(gcloud functions describe final-analysis-gemini-embedding-001 --region=$REGION --format='value(serviceConfig.uri)')
 CHAT_URL=$(gcloud functions describe chat --region=$REGION --format='value(serviceConfig.uri)')
 FEEDBACK_URL=$(gcloud functions describe send-feedback-email --region=$REGION --format='value(serviceConfig.uri)')
 EXTRACT_DISEASE_URL=$(gcloud functions describe extract-disease --region=$REGION --format='value(serviceConfig.uri)')
