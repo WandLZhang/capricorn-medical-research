@@ -205,7 +205,7 @@ REMOTE WITH CONNECTION DEFAULT
 OPTIONS(endpoint='text-embedding-005');"
 
 # Verify the model was created
-bq show --model $PROJECT_ID.model.textembed
+bq show --model $PROJECT_ID:model.textembed
 ```
 
 This creates:
@@ -434,7 +434,7 @@ export REGION=$FUNCTION_REGION
 echo "Collecting Cloud Function URLs..."
 REDACT_URL=$(gcloud functions describe redact-sensitive-info --region=$REGION --format='value(serviceConfig.uri)')
 PROCESS_LAB_URL=$(gcloud functions describe process-lab --region=$REGION --format='value(serviceConfig.uri)')
-RETRIEVE_ARTICLES_URL=$(gcloud functions describe retrieve-full-articles-live-pmc-text-embeddings-005 --region=$REGION --format='value(serviceConfig.uri)')
+RETRIEVE_ARTICLES_URL=$(gcloud functions describe retrieve-full-articles-live-pmc-text-embedding-005 --region=$REGION --format='value(serviceConfig.uri)')
 FINAL_ANALYSIS_URL=$(gcloud functions describe final-analysis --region=$REGION --format='value(serviceConfig.uri)')
 CHAT_URL=$(gcloud functions describe chat --region=$REGION --format='value(serviceConfig.uri)')
 FEEDBACK_URL=$(gcloud functions describe send-feedback-email --region=$REGION --format='value(serviceConfig.uri)')
