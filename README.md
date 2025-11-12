@@ -205,7 +205,7 @@ REMOTE WITH CONNECTION DEFAULT
 OPTIONS(endpoint='gemini-embedding-001');"
 
 # Verify the model was created
-bq show --model $PROJECT_ID.model.gemini_embedding_001
+bq show --model $PROJECT_ID:model.gemini_embedding_001
 ```
 
 This creates:

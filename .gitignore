@@ -41,7 +41,6 @@ yarn-error.log*
 bigquery-service-account.json
 
 # Firebase configuration
-firestore.rules
 .firebaserc
 frontend/.firebase/
 *.cache
