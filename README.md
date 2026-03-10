@@ -286,7 +286,7 @@ Deploy each function with its configuration:
 # Deploy all functions
 cd backend
 
-# Redact Sensitive Info
+# Redact Sensitive Info (DLP + lightweight Gemini call for date parsing)
 cd capricorn-redact-sensitive-info
 gcloud functions deploy redact-sensitive-info \
   --gen2 \
@@ -296,9 +296,15 @@ gcloud functions deploy redact-sensitive-info \
   --entry-point=redact_sensitive_info \
   --trigger-http \
   --allow-unauthenticated \
+  --cpu=1 \
+  --memory=512Mi \
+  --timeout=300s \
+  --max-instances=100 \
+  --min-instances=1 \
+  --concurrency=1 \
   --env-vars-file=.env.yaml
 
-# Process Lab
+# Process Lab (Gemini PDF parsing - network I/O bound, not CPU)
 cd ../capricorn-process-lab
 gcloud functions deploy process-lab \
   --gen2 \
@@ -308,15 +314,15 @@ gcloud functions deploy process-lab \
   --entry-point=process_lab \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=4 \
-  --memory=4Gi \
+  --cpu=1 \
+  --memory=1Gi \
   --timeout=3600s \
   --max-instances=100 \
   --min-instances=1 \
   --concurrency=80 \
   --env-vars-file=.env.yaml
 
-# Retrieve Full Articles
+# Retrieve Full Articles (BQ vector search + streaming Gemini analysis of ~15 articles)
 cd ../capricorn-retrieve-full-articles
 gcloud functions deploy retrieve-full-articles-live-pmc-text-embedding-005 \
   --gen2 \
@@ -326,16 +332,17 @@ gcloud functions deploy retrieve-full-articles-live-pmc-text-embedding-005 \
   --entry-point=retrieve_full_articles \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=6 \
-  --memory=8Gi \
+  --cpu=1 \
+  --memory=2Gi \
   --timeout=3600s \
   --max-instances=100 \
+  --min-instances=1 \
   --concurrency=1 \
   --env-vars-file=.env.yaml
 
-# Final Analysis
+# Final Analysis (BQ article fetch + single large Gemini prompt)
 cd ../capricorn-final-analysis
-gcloud functions deploy final-analysis \
+gcloud functions deploy capricorn-final-analysis \
   --gen2 \
   --runtime=python312 \
   --region=$FUNCTION_REGION \
@@ -343,14 +350,15 @@ gcloud functions deploy final-analysis \
   --entry-point=final_analysis \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=6 \
-  --memory=8Gi \
+  --cpu=1 \
+  --memory=2Gi \
   --timeout=3600s \
   --max-instances=100 \
+  --min-instances=1 \
   --concurrency=1 \
   --env-vars-file=.env.yaml
 
-# Chat
+# Chat (single streaming Gemini call)
 cd ../capricorn-chat
 gcloud functions deploy chat \
   --gen2 \
@@ -360,14 +368,14 @@ gcloud functions deploy chat \
   --entry-point=chat \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=8 \
-  --memory=8Gi \
+  --cpu=1 \
+  --memory=1Gi \
   --timeout=3600s \
   --max-instances=100 \
   --concurrency=1 \
   --env-vars-file=.env.yaml
 
-# Feedback
+# Feedback (sends email via SendGrid - minimal resources)
 cd ../capricorn-feedback
 gcloud functions deploy send-feedback-email \
   --gen2 \
@@ -378,13 +386,13 @@ gcloud functions deploy send-feedback-email \
   --trigger-http \
   --allow-unauthenticated \
   --cpu=1 \
-  --memory=512Mi \
+  --memory=256Mi \
   --timeout=300s \
   --max-instances=100 \
   --concurrency=80 \
   --env-vars-file=.env.yaml
 
-# Extract Disease
+# Extract Disease (single Gemini call)
 cd ../pubmed-search-tester-extract-disease
 gcloud functions deploy extract-disease \
   --gen2 \
@@ -394,14 +402,14 @@ gcloud functions deploy extract-disease \
   --entry-point=extract_disease \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=2 \
-  --memory=1Gi \
+  --cpu=1 \
+  --memory=512Mi \
   --timeout=600s \
   --max-instances=100 \
   --concurrency=1 \
   --env-vars-file=.env.yaml
 
-# Extract Events
+# Extract Events (single Gemini call)
 cd ../pubmed-search-tester-extract-events
 gcloud functions deploy extract-events \
   --gen2 \
@@ -411,8 +419,8 @@ gcloud functions deploy extract-events \
   --entry-point=extract_events \
   --trigger-http \
   --allow-unauthenticated \
-  --cpu=2 \
-  --memory=1Gi \
+  --cpu=1 \
+  --memory=512Mi \
   --timeout=600s \
   --max-instances=100 \
   --concurrency=1 \

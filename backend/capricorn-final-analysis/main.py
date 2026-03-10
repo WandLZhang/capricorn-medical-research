@@ -14,7 +14,6 @@
 
 import functions_framework
 from flask import jsonify, request
-import vertexai
 from google import genai
 from google.genai import types
 from google.cloud import bigquery
@@ -28,13 +27,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Initialize clients with environment variables
-vertexai.init(project=os.environ.get('GENAI_PROJECT_ID', 'gemini-med-lit-review'))
+GCP_PROJECT = os.environ.get('GENAI_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT') or 'gemini-med-lit-review'
+GCP_LOCATION = os.environ.get('LOCATION', 'global')  # gemini-3.1-pro-preview requires 'global' region
+MODEL = "gemini-3.1-pro-preview"
+
 genai_client = genai.Client(
     vertexai=True,
-    project=os.environ.get('GENAI_PROJECT_ID', 'gemini-med-lit-review'),
-    location=os.environ.get('LOCATION', 'us-central1'),
+    project=GCP_PROJECT,
+    location=GCP_LOCATION,
 )
-bq_client = bigquery.Client(project=os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016'))
+bq_client = bigquery.Client(project=os.environ.get('BIGQUERY_PROJECT_ID', GCP_PROJECT))
 
 def get_full_articles(analyzed_articles):
     """Retrieve full article content from BigQuery using PMCIDs."""
@@ -57,7 +59,7 @@ def get_full_articles(analyzed_articles):
         results = list(query_job.result())
         
         if not results:
-            logger.error(f"No articles found for PMIDs: {pmids}")
+            logger.error(f"No articles found for PMCIDs: {pmcids}")
             return []
             
         # Create mapping of PMCID to content
@@ -195,31 +197,48 @@ IMPORTANT: Return the analysis in markdown format with the specified table struc
 
 def analyze_with_gemini(prompt):
     """Analyze the case and articles using Gemini."""
-    model = "gemini-2.5-pro"
     generate_content_config = types.GenerateContentConfig(
-        temperature=0,
+        temperature=1,
         top_p=0.95,
-        max_output_tokens=8192,
-        response_modalities=["TEXT"],
+        max_output_tokens=65535,
         safety_settings=[
-            types.SafetySetting(category=cat, threshold="OFF")
-            for cat in ["HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_DANGEROUS_CONTENT", 
-                      "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_HARASSMENT"]
-        ]
+            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
+        ],
+        thinking_config=types.ThinkingConfig(
+            thinking_level="HIGH",
+        ),
     )
-    
-    contents = [types.Content(role="user", parts=[{"text": prompt}])]
-    
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=prompt)],
+        ),
+    ]
+
     try:
-        response = genai_client.models.generate_content(
-            model=model,
+        response_text = ""
+        for chunk in genai_client.models.generate_content_stream(
+            model=MODEL,
             contents=contents,
             config=generate_content_config,
-        )
-        
-        # Return the markdown text directly
-        return {"markdown_content": response.text.strip()}
-        
+        ):
+            if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+                continue
+            if chunk.text:
+                response_text += chunk.text
+
+        logger.info(f"Gemini model={MODEL} final analysis response length: {len(response_text)} chars")
+
+        if response_text:
+            return {"markdown_content": response_text.strip()}
+        else:
+            logger.error("Empty response from Gemini")
+            return None
+
     except Exception as e:
         logger.error(f"Error in analyze_with_gemini: {str(e)}")
         return None

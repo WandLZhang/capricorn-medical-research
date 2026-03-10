@@ -25,11 +25,15 @@ import os
 # Initialize DLP client
 dlp_client = dlp_v2.DlpServiceClient()
 
-# Initialize Gemini client with environment variables
+# Initialize Gemini client using Vertex AI with application-default credentials
+GCP_PROJECT = os.environ.get('PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT') or 'gemini-med-lit-review'
+GCP_LOCATION = os.environ.get('LOCATION', 'global')  # gemini-3.1-pro-preview requires 'global' region
+MODEL = "gemini-3.1-flash-lite-preview"
+
 client = genai.Client(
     vertexai=True,
-    project=os.environ.get('PROJECT_ID', 'gemini-med-lit-review'),
-    location=os.environ.get('LOCATION', 'us-central1'),
+    project=GCP_PROJECT,
+    location=GCP_LOCATION,
 )
 
 def get_info_types():
@@ -173,75 +177,43 @@ def get_info_types():
 
 def standardize_date(date_string):
     prompt = f"""Convert this date to YYYY-MM-DD format: {date_string}
-    
-    Return ONLY a JSON object with a "response" field containing the standardized date in YYYY-MM-DD format, or 'INVALID' if it cannot be converted.
-    Example: {{"response": "2023-03-22"}}"""
-    
+
+Respond with ONLY the standardized date in YYYY-MM-DD format, nothing else.
+If the date cannot be converted, respond with INVALID."""
+
     contents = [
         types.Content(
             role="user",
             parts=[
-                types.Part.from_text(text=prompt)
-            ]
+                types.Part.from_text(text=prompt),
+            ],
         ),
     ]
-    
+
     generate_content_config = types.GenerateContentConfig(
-        temperature = 1,
-        top_p = 0.95,
-        seed = 0,
-        max_output_tokens = 65535,
-        safety_settings = [types.SafetySetting(
-            category="HARM_CATEGORY_HATE_SPEECH",
-            threshold="OFF"
-        ),types.SafetySetting(
-            category="HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold="OFF"
-        ),types.SafetySetting(
-            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold="OFF"
-        ),types.SafetySetting(
-            category="HARM_CATEGORY_HARASSMENT",
-            threshold="OFF"
-        )],
-        response_mime_type = "application/json",
-        response_schema = {"type":"OBJECT","properties":{"response":{"type":"STRING"}}},
         thinking_config=types.ThinkingConfig(
-            thinking_budget=-1,
+            thinking_level="MINIMAL",
         ),
     )
-    
+
     try:
-        # Use streaming to get the response
         response_text = ""
-        raw_chunks = []
-        
         for chunk in client.models.generate_content_stream(
-            model = "gemini-2.5-pro",
-            contents = contents,
-            config = generate_content_config,
+            model=MODEL,
+            contents=contents,
+            config=generate_content_config,
         ):
-            raw_chunks.append(f"Chunk: {chunk}")
-            print(f"Raw chunk: {chunk}")
             if chunk.text:
                 response_text += chunk.text
-                print(f"Chunk text: '{chunk.text}'")
-        
-        print(f"All raw chunks: {raw_chunks}")
-        print(f"Final response text: '{response_text}'")
-        
-        if response_text:
-            import json
-            result = json.loads(response_text)
-            standardized_date = result.get('response', 'INVALID')
-            if standardized_date == 'INVALID':
-                raise ValueError("Invalid date format")
-            return standardized_date
-        else:
-            raise ValueError("Empty response from Gemini")
+
+        response_text = response_text.strip()
+        print(f"Gemini model={MODEL} date standardization response: '{response_text}'")
+
+        if not response_text or response_text == 'INVALID':
+            raise ValueError("Invalid date format")
+        return response_text
     except Exception as e:
         print(f"Error in standardize_date: {str(e)}")
-        print(f"Response text was: '{response_text}'")
         raise ValueError(f"Failed to standardize date: {str(e)}")
 
 def calculate_age(birth_date):

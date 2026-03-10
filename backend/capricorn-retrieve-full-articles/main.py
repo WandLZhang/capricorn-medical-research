@@ -56,12 +56,16 @@ def fetch_journal_impact_data():
         logger.error(f"Error fetching journal impact data: {str(e)}")
 
 # Initialize clients with environment variables
+GCP_PROJECT = os.environ.get('GENAI_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT') or 'gemini-med-lit-review'
+GCP_LOCATION = os.environ.get('LOCATION', 'global')  # gemini-3.1-pro-preview requires 'global' region
+MODEL = "gemini-3.1-pro-preview"
+
 client = genai.Client(
     vertexai=True,
-    project=os.environ.get('GENAI_PROJECT_ID', 'gemini-med-lit-review'),
-    location=os.environ.get('LOCATION', 'us-central1'),
+    project=GCP_PROJECT,
+    location=GCP_LOCATION,
 )
-bq_client = bigquery.Client(project=os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016'))
+bq_client = bigquery.Client(project=os.environ.get('BIGQUERY_PROJECT_ID', GCP_PROJECT))
 
 def normalize_journal_score(sjr):
     """Normalize journal SJR score to points between 0-25 to align with other scoring metrics."""
@@ -266,22 +270,29 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
     prompt = create_gemini_prompt(article_text, pmcid, methodology_content, disease, events_text)
     prompt += "\n\nIMPORTANT: Return ONLY the raw JSON object. Do not include any explanatory text, markdown formatting, or code blocks. The response should start with '{' and end with '}' with no other characters before or after."
     
-    # Configure Gemini
-    model = "gemini-2.5-pro"
+    # Configure Gemini with user's standard config pattern
     generate_content_config = types.GenerateContentConfig(
-        temperature=0,
+        temperature=1,
         top_p=0.95,
-        max_output_tokens=8192,
-        response_modalities=["TEXT"],
+        max_output_tokens=65535,
         safety_settings=[
-            types.SafetySetting(category=cat, threshold="OFF")
-            for cat in ["HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_DANGEROUS_CONTENT", 
-                      "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_HARASSMENT"]
-        ]
+            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
+            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
+        ],
+        thinking_config=types.ThinkingConfig(
+            thinking_level="HIGH",
+        ),
     )
     
     # Create content with prompt
-    contents = [types.Content(role="user", parts=[{"text": prompt}])]
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=prompt)],
+        ),
+    ]
     
     # Initialize retry parameters
     base_delay = 5  # Start with 5 seconds
@@ -289,11 +300,23 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
     
     while True:  # Keep trying indefinitely
         try:
-            response = client.models.generate_content(
-                model=model,
+            # Use streaming to collect the response
+            response_text = ""
+            for chunk in client.models.generate_content_stream(
+                model=MODEL,
                 contents=contents,
                 config=generate_content_config,
-            )
+            ):
+                if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+                    continue
+                if chunk.text:
+                    response_text += chunk.text
+            
+            # Create a simple response object for compatibility with existing parsing
+            class StreamedResponse:
+                def __init__(self, text):
+                    self.text = text
+            response = StreamedResponse(response_text)
             break  # If successful, break out of the retry loop
         except Exception as e:
             error_str = str(e)
@@ -301,7 +324,7 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
                 attempt += 1
                 # Calculate exponential backoff delay with a maximum of 5 minutes
                 delay = min(base_delay * (2 ** (attempt - 1)), 300)  # Cap at 300 seconds (5 minutes)
-                print(f"Received RESOURCE_EXHAUSTED error. Attempt {attempt}. Waiting {delay} seconds before retry...")
+                logger.warning(f"Received RESOURCE_EXHAUSTED error. Attempt {attempt}. Waiting {delay} seconds before retry...")
                 time.sleep(delay)
             else:
                 # If it's not a 429 error, raise immediately
@@ -382,7 +405,7 @@ def analyze_with_gemini(article_text, pmcid, methodology_content=None, disease=N
         return None
 
 def create_bq_query(events_text, num_articles=15):
-    project_id = os.environ.get('BIGQUERY_PROJECT_ID', 'playground-439016')
+    project_id = os.environ.get('BIGQUERY_PROJECT_ID', GCP_PROJECT)
     model_dataset = os.environ.get('MODEL_DATASET', 'model')
     # Use the new public PMC table
     pubmed_table = 'bigquery-public-data.pmc_open_access_commercial.articles'
