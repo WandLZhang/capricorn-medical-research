@@ -429,7 +429,12 @@ gcloud functions deploy extract-events \
 
 #### 3.3 Collect Function URLs and Update Frontend
 
-After deploying all functions, collect their URLs and automatically update the frontend:
+After deploying all functions, collect their URLs and update the frontend API configuration.
+
+**IMPORTANT:** Each Cloud Function is deployed as its own Cloud Run service with a unique URL.
+The frontend `api.js` has hardcoded URLs for ALL 8 backend functions — every one of them must be
+updated to point to YOUR project's function URLs. Skipping any will cause 400 errors because
+requests will go to the wrong service.
 
 ```bash
 # Navigate back to project root
@@ -443,11 +448,33 @@ echo "Collecting Cloud Function URLs..."
 REDACT_URL=$(gcloud functions describe redact-sensitive-info --region=$REGION --format='value(serviceConfig.uri)')
 PROCESS_LAB_URL=$(gcloud functions describe process-lab --region=$REGION --format='value(serviceConfig.uri)')
 RETRIEVE_ARTICLES_URL=$(gcloud functions describe retrieve-full-articles-live-pmc-text-embedding-005 --region=$REGION --format='value(serviceConfig.uri)')
-FINAL_ANALYSIS_URL=$(gcloud functions describe final-analysis --region=$REGION --format='value(serviceConfig.uri)')
+FINAL_ANALYSIS_URL=$(gcloud functions describe capricorn-final-analysis --region=$REGION --format='value(serviceConfig.uri)')
 CHAT_URL=$(gcloud functions describe chat --region=$REGION --format='value(serviceConfig.uri)')
 FEEDBACK_URL=$(gcloud functions describe send-feedback-email --region=$REGION --format='value(serviceConfig.uri)')
 EXTRACT_DISEASE_URL=$(gcloud functions describe extract-disease --region=$REGION --format='value(serviceConfig.uri)')
 EXTRACT_EVENTS_URL=$(gcloud functions describe extract-events --region=$REGION --format='value(serviceConfig.uri)')
+
+# Verify all URLs were collected (all should be non-empty)
+echo ""
+echo "=== Collected URLs ==="
+echo "REDACT_URL=$REDACT_URL"
+echo "PROCESS_LAB_URL=$PROCESS_LAB_URL"
+echo "RETRIEVE_ARTICLES_URL=$RETRIEVE_ARTICLES_URL"
+echo "FINAL_ANALYSIS_URL=$FINAL_ANALYSIS_URL"
+echo "CHAT_URL=$CHAT_URL"
+echo "FEEDBACK_URL=$FEEDBACK_URL"
+echo "EXTRACT_DISEASE_URL=$EXTRACT_DISEASE_URL"
+echo "EXTRACT_EVENTS_URL=$EXTRACT_EVENTS_URL"
+echo "======================"
+echo ""
+
+# Check that none are empty before proceeding
+for var in REDACT_URL PROCESS_LAB_URL RETRIEVE_ARTICLES_URL FINAL_ANALYSIS_URL CHAT_URL FEEDBACK_URL EXTRACT_DISEASE_URL EXTRACT_EVENTS_URL; do
+  if [ -z "${!var}" ]; then
+    echo "ERROR: $var is empty. Check that the function was deployed with the correct name."
+    echo "Run 'gcloud functions list --region=$REGION' to see deployed function names."
+  fi
+done
 
 # Save URLs to file for reference
 {
@@ -462,17 +489,41 @@ EXTRACT_EVENTS_URL=$(gcloud functions describe extract-events --region=$REGION -
   echo "EXTRACT_EVENTS_URL=$EXTRACT_EVENTS_URL"
 } > function-urls.txt
 
-# Update api.js with the correct URLs
-# Note: The API_BASE_URL is used for multiple functions, so we'll use the Chat function's base URL
-API_BASE_URL=$(echo $CHAT_URL | sed 's|/chat$||')
+# Update ALL hardcoded URLs in api.js
+# Each function has its own Cloud Run service URL — every one must be updated
 
-# Update the hardcoded URLs in api.js
-sed -i.bak "s|const API_BASE_URL = .*|const API_BASE_URL = '$API_BASE_URL';|" frontend/src/utils/api.js
-sed -i.bak "s|https://capricorn-feedback-[^']*|$FEEDBACK_URL|" frontend/src/utils/api.js
-sed -i.bak "s|https://capricorn-process-lab-[^']*|$PROCESS_LAB_URL|" frontend/src/utils/api.js
+# 1. Retrieve Full Articles
+sed -i.bak "s|https://retrieve-full-articles[^\`'\"]*|$RETRIEVE_ARTICLES_URL|g" frontend/src/utils/api.js
 
-echo "✓ Updated frontend/src/utils/api.js with Cloud Function URLs"
+# 2. Chat
+sed -i.bak "s|https://chat-[^\`'\"]*\.a\.run\.app|$CHAT_URL|g" frontend/src/utils/api.js
+
+# 3. Redact Sensitive Info (matches both cloudfunctions.net and a.run.app URL formats)
+sed -i.bak "s|https://[^\`'\"]*redact-sensitive-info[^\`'\"]*|$REDACT_URL|g" frontend/src/utils/api.js
+
+# 4. Extract Disease
+sed -i.bak "s|https://extract-disease-[^\`'\"]*|$EXTRACT_DISEASE_URL|g" frontend/src/utils/api.js
+
+# 5. Extract Events
+sed -i.bak "s|https://extract-events-[^\`'\"]*|$EXTRACT_EVENTS_URL|g" frontend/src/utils/api.js
+
+# 6. Final Analysis
+sed -i.bak "s|https://final-analysis-[^\`'\"]*|$FINAL_ANALYSIS_URL|g" frontend/src/utils/api.js
+sed -i.bak "s|https://capricorn-final-analysis-[^\`'\"]*|$FINAL_ANALYSIS_URL|g" frontend/src/utils/api.js
+
+# 7. Send Feedback
+sed -i.bak "s|https://send-feedback-email-[^\`'\"]*|$FEEDBACK_URL|g" frontend/src/utils/api.js
+
+# 8. Process Lab
+sed -i.bak "s|https://process-lab-[^\`'\"]*|$PROCESS_LAB_URL|g" frontend/src/utils/api.js
+
+# Clean up .bak files
+rm -f frontend/src/utils/api.js.bak
+
+echo "✓ Updated ALL 8 function URLs in frontend/src/utils/api.js"
 echo "✓ Saved URLs to function-urls.txt for reference"
+echo ""
+echo "NEXT: Rebuild and redeploy the frontend (see Section 5)"
 ```
 
 ### 4. Frontend Configuration
