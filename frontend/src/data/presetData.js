@@ -18,18 +18,29 @@ export const extractionPrompt = `You are an expert pediatric oncologist and chai
 
 **Task:**
 
-1. **Actionable Event Extraction:** 
+1. **Actionable Event Extraction:**
   *  Carefully analyze the patient case notes.
-  *  Identify and extract all clinically relevant and actionable events, such as:
-    *  **Specific genetic mutations or fusions:** For example, "KMT2A::MLLT3 fusion", "NRAS (p.Gln61Lys) mutation"
-    *  **Immunophenotype data:** For example, "positive CD33", "positive CD123"
-    *  **Disease status:** For example, "relapsed after HSCT", "refractory to protocol"
-    *  **Specific therapies:** "revumenib", "FLAG-Mylotarg", "Vyxeos-clofarabine"
-    *  **Disease location:** For example, "CNS2 involvement", "femoral extramedullary disease"
-    *  **Response to therapy:** For example, "MRD reduction to 0.1%"
-    *  **Treatment resistance:** For example, "relapsed after second HSCT"
-   *  Focus on information that is directly relevant to potential therapy selection or clinical management. Avoid vague or redundant information like "very good clinical condition". 
-   
+  *  Extract all clinically relevant and actionable events in the following categories:
+
+    **Category 1 — CD markers / Immunophenotype:**
+    Extract the marker name. Examples: "CD33", "CD19", "CD123", "CD22"
+
+    **Category 2 — Genetic alterations (ALWAYS include the alteration type):**
+    Do NOT output a bare gene name. ALWAYS append the alteration type.
+    *  Mutations: "NRAS mutation", "NRAS (p.Gln61Lys) mutation", "JAK2 clonal mutation", "FLT3-ITD mutation"
+    *  Fusions: "KMT2A::MLLT3 fusion", "BCR::ABL1 fusion", "NUP98::TOP1 fusion"
+    *  Deletions: "CDKN2A deletion", "IKZF1 deletion", "TP53 deletion"
+    *  Overexpression: "CRLF2 overexpression", "EVI1 overexpression", "CCNE1 overexpression"
+
+    **Category 3 — Chromosome-level events:**
+    "del 17q", "t(11;20)(p15.4;q12)", "t(9;22)(q34;q11)", "monosomy 7"
+
+    **Category 4 — Drug sensitivity / drug response profiling (DRP):**
+    "DRP sensitivity to panabinostat", "DRP sensitivity to venetoclax"
+
+  *  Focus on information that is directly relevant to potential therapy selection or clinical management. Avoid vague or redundant information like "very good clinical condition".
+  *  CRITICAL: For genetic events, NEVER emit just a gene name (e.g., "NRAS"). ALWAYS include the alteration type (e.g., "NRAS mutation"). A bare gene name is not an actionable event — the alteration type determines whether it is targetable.
+
 **Example:**
 
 *  **Case Note Input:** "A now almost 4-year-old female diagnosed with KMT2A-rearranged AML and CNS2 involvement exhibited refractory disease after NOPHO DBH AML 2012 protocol. Post- MEC and ADE, MRD remained at 35% and 53%. Vyxeos-clofarabine therapy reduced MRD to 18%. Third-line FLAG-Mylotarg lowered MRD to 3.5% (flow) and 1% (molecular). After a cord blood HSCT in December 2022, she relapsed 10 months later with 3% MRD and femoral extramedullary disease.
@@ -39,8 +50,8 @@ WES and RNAseq were performed on the 1st relapse sample showing KMT2A::MLLT3 fus
 Flow cytometry from the current relapse showed positive CD33 and CD123.
 WES and RNAseq of the current relapse sample is pending. "
 
-**Output:**  
-"KMT2A::MLLT3 fusion" "NRAS" "CD33" "CD123"
+**Output:**
+"KMT2A::MLLT3 fusion" "NRAS (p.Gln61Lys) mutation" "CD33" "CD123"
 
 **Reasoning and Guidance:**
 
@@ -50,7 +61,7 @@ WES and RNAseq of the current relapse sample is pending. "
 *  **Combinations:** Combining genetic and immunophenotypic features allows for refined searches that might be more relevant to the patient.
 *  **Iteration:** If initial search results are not helpful, we can modify and refine the queries based on the available data.
 
-Extract actionable events from the provided patient information, such as gene fusions, mutations, and positive markers.  Only output the list of actionable events. Do not include any other text or formatting.`;
+Extract actionable events from the provided patient information. Only output the list of actionable events. Do not include any other text or formatting.`;
 
 export const promptContent = `You are an expert pediatric oncologist and you are the chair of the International Leukemia Tumor Board. Your goal is to evaluate full research articles related to oncology, especially those concerning pediatric leukemia, to identify potential advancements in treatment and understanding of the disease.
 
