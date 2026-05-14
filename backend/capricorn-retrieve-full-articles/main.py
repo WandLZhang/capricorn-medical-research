@@ -418,6 +418,16 @@ def create_bq_query(events_text, num_articles=15, disease=None):
     # therapies (CAR-T, ADC). When disease is None, behavior is unchanged.
     query_body = f"{disease}\n\n{events_text}" if disease else events_text
 
+    # The public PMC corpus has duplicate rows for ~113K PMCIDs (data quality
+    # issue at ingestion -- see note to corpus maintainer). Without dedup,
+    # VECTOR_SEARCH returns all duplicate rows and a user requesting
+    # num_articles=3 can get the same article three times.
+    # Strategy: over-fetch (5x or +20, capped at 500), dedupe by pmc_id keeping
+    # the row with smallest distance (best similarity), then LIMIT to the
+    # user's requested num_articles. Vector search is cheap; the expensive
+    # per-article Gemini analysis only runs on the deduped set.
+    over_fetch = min(max(num_articles * 5, num_articles + 20), 500)
+
     return f"""
     DECLARE query_text STRING;
     SET query_text = \"\"\"
@@ -434,11 +444,19 @@ def create_bq_query(events_text, num_articles=15, disease=None):
                  MODEL `{embedding_model}`,
                  (SELECT query_text AS content)
              )),
-            top_k => {num_articles}
+            top_k => {over_fetch}
         )
+    ),
+    deduped AS (
+        SELECT pmc_id, pmid, article_text, distance,
+               ROW_NUMBER() OVER (PARTITION BY pmc_id ORDER BY distance) AS rn
+        FROM vector_results
     )
-    SELECT * FROM vector_results
+    SELECT pmc_id, pmid, article_text, distance
+    FROM deduped
+    WHERE rn = 1
     ORDER BY distance
+    LIMIT {num_articles}
     """
 
 def stream_response(events_text, methodology_content=None, disease=None, num_articles=15):
